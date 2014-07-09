@@ -8,10 +8,13 @@
 #     http://doc.scrapy.org/en/latest/topics/settings.html
 #
 
-BOT_NAME = 'barbados_stockex_scraper'
 
 SPIDER_MODULES = ['barbados_stockex_scraper.spiders']
 NEWSPIDER_MODULE = 'barbados_stockex_scraper.spiders'
-
-# Crawl responsibly by identifying yourself (and your website) on the user-agent
-#USER_AGENT = 'barbados_stockex_scraper (+http://www.yourdomain.com)'
+ITEM_PIPELINES = {
+    'barbados_stockex_scraper.files.FilesPipeline': 100,
+}
+try:
+    from local_settings import *
+except ImportError:
+    pass

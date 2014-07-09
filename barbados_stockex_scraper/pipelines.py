@@ -1,11 +1,13 @@
-# -*- coding: utf-8 -*-
-
-# Define your item pipelines here
-#
-# Don't forget to add your pipeline to the ITEM_PIPELINES setting
-# See: http://doc.scrapy.org/en/latest/topics/item-pipeline.html
+from barbados_stockex_scraper.files import FilesPipeline
+from scrapy.http import Request
 
 
-class BarbadosStockexScraperPipeline(object):
-    def process_item(self, item, spider):
-        return item
+class PDFPipeline(FilesPipeline):
+    def get_media_requests(self, item, info):
+        for file_spec in item['file_urls']:
+            yield Request(
+                url=file_spec["file_url"], meta={"file_spec": file_spec}
+            )
+
+    def file_path(self, request, response=None, info=None):
+        return request.meta["file_spec"]["file_name"]
