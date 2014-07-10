@@ -11,3 +11,10 @@ class PDFPipeline(FilesPipeline):
 
     def file_path(self, request, response=None, info=None):
         return request.meta["file_spec"]["file_name"]
+
+    def file_downloaded(self, response, request, info):
+        path = self.file_path(request, response=response, info=info)
+        buf = StringIO(response.body)
+        self.store.persist_file(path, buf, info)
+        checksum = md5sum(buf)
+        return checksum

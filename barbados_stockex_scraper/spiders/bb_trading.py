@@ -35,7 +35,8 @@ class BSETrading(BaseSpider):
             else:
                 self.end = None
 
-    def get_file_urls(self):
+    @property
+    def file_urls(self):
         domain = "http://www.bse.com.bb"
         path = "sites/default/files/trading_reports"
 
@@ -51,7 +52,10 @@ class BSETrading(BaseSpider):
             ]
 
     def parse(self, response):
-        yield PDFItem(
-            file_urls=['http://www.bse.com.bb/sites/default/files/trading_reports/20140707.pdf']
-
-        )
+        for url in self.file_urls:
+            yield PDFItem(
+                file_urls=[{
+                    'file_url': url,
+                    'file_name': url.split('/')[-1]
+                }]
+            )
