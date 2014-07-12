@@ -1,4 +1,4 @@
-from scrapy.spider import BaseSpider
+from scrapy.spider import Spider
 from dateutil.parser import parse
 from datetime import date
 from barbados_stockex_scraper.items import PDFItem
@@ -15,7 +15,7 @@ def bdate_range(start, end):
     )
 
 
-class BSETrading(BaseSpider):
+class BSETrading(Spider):
     name = 'bse_trading_pdf'
     allowed_domains = ['http://www.bse.com.bb']
     start_urls = ["http://www.bse.com.bb", ]
