@@ -84,12 +84,12 @@ class PDFPipeline(FilesPipeline):
         for cnt, page in enumerate(PDFPage.get_pages(buf), start=0):
             interpreter.process_page(page)
             data = outstr.getvalue()
-            #if cnt == 1:
-                #ix_data = self.process_index_data(data)
-                #for row in ix_data:
-                    #log.msg(','.join(row),
-                            #level=log.WARNING
-                            #)
+            if cnt == 1:
+                ix_data = self.process_index_data(data)
+                for row in ix_data:
+                    log.msg(','.join(row),
+                            level=log.WARNING
+                            )
             if cnt == 0:
                 ix_data = self.process_security_data(data)
                 for row in ix_data:
