@@ -1,11 +1,10 @@
 from barbados_stockex_scraper.files import FilesPipeline
 from scrapy.http import Request
-from pdfminer.pdfpage import PDFPage
-from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
-from pdfminer.layout import LAParams
-from pdfminer.converter import TextConverter
 from cStringIO import StringIO
 from scrapy.utils.misc import md5sum
+import tempfile
+import subprocess
+
 from scrapy import log
 import re
 import calendar
@@ -16,7 +15,7 @@ date_expr = re.compile(
     calendar.month_name[1:])
 )
 nums_expr = re.compile(r'\n\d+(?:,\d+)?')
-num_clean = lambda x: x.replace(',', '').strip()
+num_clean = lambda x: x.replace(',', '').replace('$','').strip()
 
 
 class PDFPipeline(FilesPipeline):
@@ -29,73 +28,79 @@ class PDFPipeline(FilesPipeline):
     def file_path(self, request, response=None, info=None):
         return request.meta["file_spec"]["file_name"]
 
-    def process_index_data(self, data):
-        index_items = ['local', 'crosslist', 'composite']
-        dd = parser.parse(date_expr.findall(data)[0]).strftime('%Y-%m-%d')
-        nums = nums_expr.findall(data)
-        ix_data = [
-            (dd, "{}-ix".format(x), num_clean(y))
-            for x, y in zip(*[index_items, nums[:3]])
-        ]
-        mkt_cap = [
-            (dd, "{}-mktcap".format(x), num_clean(y))
-            for x, y in zip(*[index_items, nums[6:9]])
-        ]
-        return ix_data + mkt_cap
-
-    def process_security_data(self, instr):
-        dd = parser.parse(date_expr.findall(instr)[0]).strftime('%Y-%m-%d')
-        data_list = instr.splitlines()
-        start = data_list.index('Decline ') + 2
-        for cnt, r in enumerate(data_list[start:], start=start):
-            if not r:
-                pos = cnt + 1
-                break
-        symbol_list = data_list[start:pos - 1]
+    def get_index_data(self, dd, lns):
+        ixs = [i for i, j in enumerate(lns) if 'Local' in j]
+        ix_start = ixs[0]
+        index_items = ['LOCAL', 'CROSSLIST', 'COMPOSITE']
         ret_list = []
-        for col in ['volume', 'high', 'close', 'change']:
-            ser_name = ['{}-{}'.format(s, col) for s in symbol_list]
-            ret_list += [(dd, x, num_clean(y)) for x, y in
-                         zip(*[ser_name,
-                               data_list[pos: pos + len(symbol_list) + 1]])]
-            pos = pos + len(symbol_list) + 1
+        for c, itm in enumerate(index_items):
+            ln = lns[ix_start + c].split()
+            ret_list.append([dd, itm, num_clean(ln[1])])
+
+        ix_start = ixs[1]
+        for c, itm in enumerate(index_items):
+            ln = lns[ix_start + c].split()
+            ret_list.append([dd, '{}-MKT_CAP'.format(itm), num_clean(ln[1])])
 
         return ret_list
+
+    def market_data(self, dd, lns, search_str):
+        ixs = [i for i, j in enumerate(lns) if search_str in j]
+        if not ixs:
+            return []
+        ix_start = ixs[1] + 4
+        ret_list = []
+        for ln in lns[ix_start:]:
+            if not ln:
+                break
+            d_list = ln.split()
+            nums = d_list[-5:]
+            symbol = ' '.join(d_list[: len(d_list) - 5])
+            volume = num_clean(nums[0])
+            high = num_clean(nums[1])
+            low = num_clean(nums[2])
+            close = num_clean(nums[3])
+            change = num_clean(nums[4])
+            sopen = float(close) - float(change)
+            res = [
+                [dd, '{}-VOLUME'.format(symbol), volume],
+                [dd, '{}-HIGH'.format(symbol), high],
+                [dd, '{}-LOW'.format(symbol), low],
+                [dd, '{}-HIGH'.format(symbol), high],
+                [dd, '{}-OPEN'.format(symbol), sopen],
+            ]
+            ret_list.append(res)
+
+        return ret_list
+
+    def text_extract(self, buf):
+        tf = tempfile.NamedTemporaryFile()
+        tf.write(buf.read())
+        tf.seek(0)
+
+        otf = tempfile.NamedTemporaryFile()
+        out, err = subprocess.Popen(
+            ['pdftotext', "-layout", tf.name, otf.name]).communicate()
+
+        return otf.read()
 
     def file_downloaded(self, response, request, info):
 
         path = self.file_path(request, response=response, info=info)
         buf = StringIO(response.body)
+        txt = self.text_extract(buf)
+        lns = [ln.strip() for ln in txt.splitlines()]
+        dd = parser.parse(lns[1]).strftime('%Y-%m-%d')
 
-        # Define parameters to the PDF device objet
-        rsrcmgr = PDFResourceManager()
-        outstr = StringIO()
-        laparams = LAParams()
-        codec = 'utf-8'
+        data = self.get_index_data(dd, lns)
+        for d in data:
+            log.msg("|".join(d), level=log.INFO)
 
-        # Create a PDF device object
-        device = TextConverter(
-            rsrcmgr, outstr, codec=codec, laparams=laparams
-        )
+        reg_mkt = self.market_data(dd, lns, "Regular Market")
 
-        # Create a PDF interpreter object
-        interpreter = PDFPageInterpreter(rsrcmgr, device)
-        #page
-        for cnt, page in enumerate(PDFPage.get_pages(buf), start=0):
-            interpreter.process_page(page)
-            data = outstr.getvalue()
-            if cnt == 1:
-                ix_data = self.process_index_data(data)
-                for row in ix_data:
-                    log.msg(','.join(row),
-                            level=log.WARNING
-                            )
-            if cnt == 0:
-                ix_data = self.process_security_data(data)
-                for row in ix_data:
-                    log.msg(','.join(row),
-                            level=log.WARNING
-                            )
+        for r in reg_mkt:
+            for el in r:
+                log.msg(str(el), level=log.INFO)
 
         self.store.persist_file(path, buf, info)
         checksum = md5sum(buf)
